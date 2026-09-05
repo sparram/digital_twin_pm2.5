@@ -2,9 +2,15 @@ import time
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import numpy as np
 
+# Módulos originales de tu proyecto
 from src.grid import setup_grid, load_and_clean_data, build_observation_matrix_H
 from src.enkf_jax import run_enkf_assimilation
+
+# Nuevos módulos de métricas y visualización
+from src.metrics import compute_assimilation_metrics, plot_station_validation
+from src.visualization import generate_assimilation_gif
 
 def main():
     # 1. Configurar semilla determinista para JAX
@@ -38,7 +44,7 @@ def main():
     key, subkey = jax.random.split(key)
     campo_reconstruido, ensemble_final = run_enkf_assimilation(
         subkey, Y_obs, timestamps, H, dx, dy, 
-        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=2.5, Q_std=1.5
+        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=0.5, Q_std=3.5
     )
     
     # Sincronizar llamadas asíncronas de JAX para medir tiempo real de ejecución
@@ -49,12 +55,36 @@ def main():
     print(f"Tiempo total de ejecución JAX: {elapsed_time:.4f} segundos")
     print(f"Velocidad promedio: {len(timestamps) / elapsed_time:.2f} pasos/segundo")
 
-    # 6. Visualización del campo asimilado final
+    # 6. Calcular Métricas de Rendimiento (RMSE y R2)
+    Y_pred, rmse_per_step, rmse_global, r2_global = compute_assimilation_metrics(
+        Y_obs, campo_reconstruido, H
+    )
+    
+    print("\n" + "="*45)
+    print("       MÉTRICAS DE ASIMILACIÓN (EnKF + JAX)    ")
+    print("="*45)
+    print(f"  RMSE Global   : {rmse_global:.3f} µg/m³")
+    print(f"  R² Global     : {r2_global:.4f} ({r2_global*100:.2f}% de varianza explicada)")
+    print("="*45 + "\n")
+
+    # 7. Graficar comparación temporal en la estación ITA-CJUS (Itagüí)
+    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='ITA-CJUS')
+
+    # 8. Exportar GIF Animado del Gemelo Digital
+    generate_assimilation_gif(
+        campo_reconstruido=campo_reconstruido,
+        X=X,
+        Y=Y,
+        active_est_km=active_est_km,
+        timestamps=timestamps,
+        output_gif='aburra_pm25_enkf.gif'
+    )
+
+    # 9. Visualización del campo asimilado final
     plt.figure(figsize=(8, 6), dpi=120)
     plt.pcolormesh(X, Y, campo_reconstruido[-1], cmap='YlOrRd', shading='auto')
     plt.colorbar(label=r'PM2.5 ($\mu g / m^3$)')
     
-    # Posiciones de las estaciones SIATA sobre la malla
     for code, (x_est, y_est) in active_est_km.items():
         plt.scatter(x_est, y_est, color='blue', edgecolors='white', zorder=5)
         plt.annotate(code, (x_est + 0.3, y_est + 0.3), fontsize=7, color='black', weight='bold')
