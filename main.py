@@ -34,7 +34,7 @@ def main():
     print("Compilando grafos de cómputo JAX (Warmup)...")
     key, subkey = jax.random.split(key)
     _ = run_enkf_assimilation(
-        subkey, Y_obs[:2], timestamps[:2], H, dx, dy, n_ensemble=10, Nx=Nx, Ny=Ny
+        subkey, Y_obs[:2], timestamps[:2], H, dx, dy, X, Y, active_est_km, n_ensemble=10, Nx=Nx, Ny=Ny
     )
     
     # 5. Ejecución del filtro EnKF completo con benchmarking
@@ -43,7 +43,7 @@ def main():
     
     key, subkey = jax.random.split(key)
     campo_reconstruido, ensemble_final = run_enkf_assimilation(
-        subkey, Y_obs, timestamps, H, dx, dy, 
+        subkey, Y_obs, timestamps, H, dx, dy, X, Y, active_est_km,
         dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=0.5, Q_std=3.5
     )
     
