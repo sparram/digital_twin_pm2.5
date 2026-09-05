@@ -1,62 +1,115 @@
 import io
+import os
+from concurrent.futures import ProcessPoolExecutor
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-from tqdm import tqdm  # Barra de progreso
-from src.physics_jax import get_wind_aburra
+from tqdm import tqdm
+
+# Transformación aproximada de Grid Local (km) -> Lat/Lon (Valle de Aburrá)
+LON_CENTER, LAT_CENTER = -75.575, 6.25
+
+def km_to_latlon(x_km, y_km):
+    lon = LON_CENTER + x_km / (111.32 * np.cos(np.radians(LAT_CENTER)))
+    lat = LAT_CENTER + y_km / 110.57
+    return lon, lat
+
+def _render_single_frame(args):
+    """Función trabajadora para renderizado en paralelo por CPU."""
+    t, field, Lon, Lat, active_est_km, Y_obs_t, station_codes, timestamp, v_max = args
+    
+    fig, ax = plt.subplots(figsize=(8, 7.5), dpi=100)
+    
+    # 1. Contornos rellenados y líneas de nivel (Estilo SIG/GIS)
+    levels = np.linspace(0, max(v_max, 40.0), 16)
+    cf = ax.contourf(Lon, Lat, field, levels=levels, cmap='YlOrRd', extend='max')
+    ax.contour(Lon, Lat, field, levels=levels, colors='brown', linewidths=0.3, alpha=0.4)
+    
+    # 2. Barra de color estilizada
+    cbar = plt.colorbar(cf, ax=ax, pad=0.02, shrink=0.9, extendfrac=0.05)
+    cbar.set_label(r'PM2.5 ($\mu g/m^3$)', fontsize=10, fontweight='bold')
+    
+    # Líneas horizontales de umbral de calidad del aire en la barra
+    cbar.ax.axhline(13.0, color='green', linestyle='--', linewidth=1.5)
+    cbar.ax.axhline(23.0, color='orange', linestyle='--', linewidth=1.5)
+
+    # 3. Estaciones de Monitoreo con cajas de texto redondeadas
+    for idx, (code, (x_est, y_est)) in enumerate(active_est_km.items()):
+        lon_est, lat_est = km_to_latlon(x_est, y_est)
+        val_obs = Y_obs_t[idx] if Y_obs_t is not None else 0.0
+        
+        # Color del punto según nivel de alerta
+        dot_color = '#2ca02c' if val_obs < 15 else ('#ff7f0e' if val_obs < 35 else '#d62728')
+        
+        ax.scatter(lon_est, lat_est, c=dot_color, edgecolors='black', s=55, zorder=6)
+        
+        # Etiqueta con caja de texto blanca
+        label_text = f"{code}\n({val_obs:.1f})"
+        ax.annotate(
+            label_text, 
+            (lon_est, lat_est),
+            xytext=(0, 12), textcoords="offset points",
+            ha='center', fontsize=7, fontweight='bold',
+            bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="black", lw=0.8),
+            zorder=7
+        )
+
+    # 4. Título y Formato de Ejes
+    ax.set_title(
+        f"Digital Twin: Asimilación EnKF 2D - PM2.5\nValle de Aburrá | {timestamp.strftime('%Y-%m-%d %H:%M')}",
+        fontsize=11, fontweight='bold', pad=10
+    )
+    ax.set_xlabel(r"Longitud ($^\circ$W)", fontsize=9, fontweight='bold')
+    ax.set_ylabel(r"Latitud ($^\circ$N)", fontsize=9, fontweight='bold')
+    
+    ax.tick_params(labelsize=8)
+    ax.set_xlim(Lon.min(), Lon.max())
+    ax.set_ylim(Lat.min(), Lat.max())
+    plt.tight_layout()
+
+    # Guardar cuadro en memoria
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=100)
+    plt.close(fig)
+    buf.seek(0)
+    return t, Image.open(buf).convert('RGB')
 
 def generate_assimilation_gif(
-    campo_reconstruido, X, Y, active_est_km, timestamps, output_gif='aburra_pm25_enkf.gif'
+    campo_reconstruido, X, Y, active_est_km, timestamps, Y_obs=None, station_codes=None, output_gif='aburra_pm25_enkf.gif'
 ):
-    """Genera una animación GIF con la evolución diurna del campo asimilado y el viento."""
-    images = []
+    """Genera la animación GIF súper rápida procesando cuadros en paralelo."""
     total_steps = len(timestamps)
-    
     v_max = float(np.max(campo_reconstruido))
-    v_min = float(np.min(campo_reconstruido))
     
-    print(f"\n[GIF] Generando animación ({total_steps} cuadros)...")
+    # Convertir mallas a Lat/Lon
+    Lon, Lat = km_to_latlon(X, Y)
     
-    # Bucle con barra de progreso tqdm
-    for t in tqdm(range(total_steps), desc="Renderizando cuadros del GIF"):
-        fig, ax = plt.subplots(figsize=(7.5, 6.5), dpi=100)
-        
-        # 1. Campo escalar 2D de PM2.5
-        mesh = ax.pcolormesh(X, Y, campo_reconstruido[t], cmap='YlOrRd', vmin=v_min, vmax=v_max, shading='auto')
-        cbar = plt.colorbar(mesh, ax=ax, shrink=0.85)
-        cbar.set_label(r'$PM_{2.5}$ ($\mu g / m^3$)', fontsize=9)
-        
-        # 2. Vector de viento (flecha indicativa)
-        u_w, v_w = get_wind_aburra(timestamps[t].hour)
-        ax.quiver(-7.5, 10, u_w, v_w, scale=18, color='blue', width=0.009, zorder=6)
-        ax.text(-7.2, 11.2, f"Viento: u={u_w:.1f}, v={v_w:.1f} km/h", color='blue', fontsize=8, weight='bold')
-        
-        # 3. Estaciones de monitoreo SIATA
-        for code, (x_est, y_est) in active_est_km.items():
-            ax.scatter(x_est, y_est, color='blue', edgecolors='white', zorder=7, s=35)
-            ax.text(x_est + 0.3, y_est + 0.3, code, fontsize=7, fontweight='bold', color='black')
-            
-        ax.set_title(f"Gemelo Digital Aburrá PM2.5 — {timestamps[t].strftime('%Y-%m-%d %H:%M')}", fontsize=10, fontweight='bold')
-        ax.set_xlabel("X (km)", fontsize=9)
-        ax.set_ylabel("Y (km)", fontsize=9)
-        ax.set_xlim(X.min(), X.max())
-        ax.set_ylim(Y.min(), Y.max())
-        ax.grid(True, linestyle=':', alpha=0.3)
-        plt.tight_layout()
-        
-        # Convertir figura a objeto de imagen PIL en memoria
-        buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=100)
-        plt.close(fig)
-        buf.seek(0)
-        images.append(Image.open(buf).convert('RGB'))
-        
-    # Guardar como GIF animado (8 FPS)
-    images[0].save(
+    # Preparar argumentos para cada proceso
+    tasks = [
+        (t, campo_reconstruido[t], Lon, Lat, active_est_km, 
+         Y_obs[t] if Y_obs is not None else None, station_codes, timestamps[t], v_max)
+        for t in range(total_steps)
+    ]
+
+    print(f"\n[GIF] Renderizando {total_steps} cuadros en paralelo (Multiprocessing)...")
+    
+    frames_dict = {}
+    max_workers = min(os.cpu_count() or 4, 8)
+    
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        results = list(tqdm(executor.map(_render_single_frame, tasks), total=total_steps, desc="Renderizando"))
+        for t, img in results:
+            frames_dict[t] = img
+
+    # Ordenar cuadros
+    ordered_images = [frames_dict[t] for t in range(total_steps)]
+
+    # Guardar GIF
+    ordered_images[0].save(
         output_gif,
         save_all=True,
-        append_images=images[1:],
-        duration=125,
+        append_images=ordered_images[1:],
+        duration=120,
         loop=0
     )
-    print(f"¡GIF guardado exitosamente como '{output_gif}'!")
+    print(f"¡GIF guardado en estilo SIG profesional como '{output_gif}'!")

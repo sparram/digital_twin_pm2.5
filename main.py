@@ -22,7 +22,7 @@ def main():
     
     csv_path = 'data/Estaciones_PM2.5_2026_06.csv'
     Y_obs, timestamps, active_est_km, codes = load_and_clean_data(
-        csv_path=csv_path, max_steps=96
+        csv_path=csv_path, max_steps=int(24*7)
     )
     
     # 3. Construir Operador de Observación H
@@ -77,6 +77,8 @@ def main():
         Y=Y,
         active_est_km=active_est_km,
         timestamps=timestamps,
+        Y_obs=np.array(Y_obs),
+        station_codes=codes,
         output_gif='aburra_pm25_enkf.gif'
     )
 
