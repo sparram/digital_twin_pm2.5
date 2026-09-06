@@ -44,7 +44,7 @@ def main():
     key, subkey = jax.random.split(key)
     campo_reconstruido, ensemble_final = run_enkf_assimilation(
         subkey, Y_obs, timestamps, H, dx, dy, X, Y, active_est_km,
-        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=0.5, Q_std=3.5
+        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=1.5, Q_std=3.5
     )
     
     # Sincronizar llamadas asíncronas de JAX para medir tiempo real de ejecución
@@ -69,6 +69,8 @@ def main():
 
     # 7. Graficar comparación temporal en la estación ITA-CJUS (Itagüí)
     plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='ITA-CJUS')
+    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='SAB-RAME')
+    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='CEN-TRAF')
 
     # 8. Exportar GIF Animado del Gemelo Digital
     generate_assimilation_gif(

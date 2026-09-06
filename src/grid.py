@@ -6,17 +6,27 @@ import jax.numpy as jnp
 LAT_REF, LON_REF = 6.2442, -75.5812
 
 DEFAULT_STATIONS = {
-    'ITA-CJUS': (6.185667, -75.597206),
     'SAB-RAME': (6.145500, -75.621260),
     'ENV-HOST': (6.168490, -75.581970),
-    'MED-CES':  (6.207386, -75.551851),
-    'MED-TESO': (6.199870, -75.560950),
     'MED-VILL': (6.261722, -75.551639),
     'MED-SCRI': (6.280500, -75.636600),
     'MED-ARAN': (6.293460, -75.556427),
     'BEL-FEVE': (6.337550, -75.567800),
-    #'MED-ALTA': (6.221894, -75.610603),
-    'MED-FISC': (6.268789, -75.573708)
+    'MED-FISC': (6.268789, -75.573708),
+    'CEN-TRAF': (6.252561, -75.56958),
+    'EST-HOSP': (6.155531, -75.644169),
+    'EST-TABL': (6.118056, -75.631943),
+    'MED-PVLQ': (6.285, -75.583055),
+    'MED-BEME': (6.243, -75.61201),
+    'MED-SELE': (6.236361, -75.498472),
+    'MED-PROV': (6.229778, -75.586052),
+    'MED-ALTA': (6.221894, -75.610603),
+    'MED-CES':  (6.207386, -75.551851),
+    'MED-TESO': (6.199870, -75.560950),
+    'ITA-CJUS': (6.185667, -75.597206),
+    #'COP-CVID': (6.345361, -75.50474),
+    #'GIR-EPM' : (6.373635, -75.448145),
+    #'CAL-JOAR': (6.093078, -75.637764)
 }
 
 def latlon_to_km(lat: float, lon: float, lat_ref: float = LAT_REF, lon_ref: float = LON_REF):
@@ -25,7 +35,7 @@ def latlon_to_km(lat: float, lon: float, lat_ref: float = LAT_REF, lon_ref: floa
     y_km = (lat - lat_ref) * 110.57
     return float(x_km), float(y_km)
 
-def setup_grid(Nx: int = 25, Ny: int = 30, x_lim: tuple = (-10, 10), y_lim: tuple = (-12, 12)):
+def setup_grid(Nx: int = 25, Ny: int = 30, x_lim: tuple = (-12, 12), y_lim: tuple = (-14, 14)):
     """Genera la malla espacial 2D y calcula los deltas dx, dy."""
     x = np.linspace(x_lim[0], x_lim[1], Nx)
     y = np.linspace(y_lim[0], y_lim[1], Ny)
