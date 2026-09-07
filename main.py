@@ -68,7 +68,7 @@ def main():
     print("="*45 + "\n")
 
     # 7. Graficar comparación temporal en la estación ITA-CJUS (Itagüí)
-    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='ITA-CJUS')
+    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='MED-ARAN')
     plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='SAB-RAME')
     plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='CEN-TRAF')
 

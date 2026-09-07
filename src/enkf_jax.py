@@ -1,7 +1,7 @@
 from functools import partial
 import jax
 import jax.numpy as jnp
-from src.physics_jax import forecast_step, get_wind_aburra
+from src.physics_jax import forecast_step, get_wind_from_data
 
 def gaspari_cohn(r: jnp.ndarray, r_cut: float) -> jnp.ndarray:
     """Función de suavizado de Gaspari-Cohn (soporte compacto)."""
@@ -99,11 +99,11 @@ def run_enkf_assimilation(
     
     for t in range(total_steps):
         key, subkey_fore, subkey_anal = jax.random.split(key, 3)
-        u_wind, v_wind = get_wind_aburra(timestamps[t].hour)
+        u_t, v_t = get_wind_from_data(t)
         
         # Paso 1: Pronóstico
         ensemble = forecast_step(
-            subkey_fore, ensemble, u_wind, v_wind, dx, dy, dt, Q_std=Q_std, Nx=Nx, Ny=Ny
+            subkey_fore, ensemble, u_t, v_t, dx, dy, dt, Q_std=Q_std, Nx=Nx, Ny=Ny
         )
         
         # Paso 2: Análisis (Pasando C_mat)

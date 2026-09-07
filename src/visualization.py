@@ -6,6 +6,8 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
+from src.physics_jax import get_wind_from_data
+
 # Transformación aproximada de Grid Local (km) -> Lat/Lon (Valle de Aburrá)
 LON_CENTER, LAT_CENTER = -75.575, 6.25
 
@@ -20,30 +22,44 @@ def _render_single_frame(args):
     
     fig, ax = plt.subplots(figsize=(8, 7.5), dpi=100)
     
-    # 1. Contornos rellenados y líneas de nivel (Estilo SIG/GIS)
+    # 1. Contornos rellenados y líneas de nivel (PM2.5)
     levels = np.linspace(0, max(v_max, 40.0), 16)
     cf = ax.contourf(Lon, Lat, field, levels=levels, cmap='YlOrRd', extend='max')
     ax.contour(Lon, Lat, field, levels=levels, colors='brown', linewidths=0.3, alpha=0.4)
     
-    # 2. Barra de color estilizada
+    # 2. Flecha de Viento Única en la Esquina Superior Derecha
+    u_t, v_t = get_wind_from_data(t)
+    v_mag = np.sqrt(u_t**2 + v_t**2)
+    
+    if v_mag > 1e-3:
+        # Vector unitario para mantener la flecha con longitud constante en pantalla
+        u_norm, v_norm = u_t / v_mag, v_t / v_mag
+        
+        ax.quiver(
+            0.91, 0.90, u_norm, v_norm, transform=ax.transAxes,
+            color='navy', scale=10, width=0.012, zorder=8
+        )
+        ax.text(
+            0.91, 0.83, f"{v_mag:.1f} km/h", transform=ax.transAxes,
+            ha='center', fontsize=8, fontweight='bold', color='navy',
+            bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="navy", lw=0.8),
+            zorder=8
+        )
+
+    # 3. Barra de color estilizada
     cbar = plt.colorbar(cf, ax=ax, pad=0.02, shrink=0.9, extendfrac=0.05)
     cbar.set_label(r'PM2.5 ($\mu g/m^3$)', fontsize=10, fontweight='bold')
-    
-    # Líneas horizontales de umbral de calidad del aire en la barra
     cbar.ax.axhline(13.0, color='green', linestyle='--', linewidth=1.5)
     cbar.ax.axhline(23.0, color='orange', linestyle='--', linewidth=1.5)
 
-    # 3. Estaciones de Monitoreo con cajas de texto redondeadas
+    # 4. Estaciones de Monitoreo
     for idx, (code, (x_est, y_est)) in enumerate(active_est_km.items()):
         lon_est, lat_est = km_to_latlon(x_est, y_est)
         val_obs = Y_obs_t[idx] if Y_obs_t is not None else 0.0
         
-        # Color del punto según nivel de alerta
         dot_color = '#2ca02c' if val_obs < 15 else ('#ff7f0e' if val_obs < 35 else '#d62728')
-        
         ax.scatter(lon_est, lat_est, c=dot_color, edgecolors='black', s=55, zorder=6)
         
-        # Etiqueta con caja de texto blanca
         label_text = f"{code}\n({val_obs:.1f})"
         ax.annotate(
             label_text, 
@@ -54,10 +70,10 @@ def _render_single_frame(args):
             zorder=7
         )
 
-    # 4. Título y Formato de Ejes
+    # 5. Título y Formato de Ejes
     ax.set_title(
         f"Digital Twin: Asimilación EnKF 2D - PM2.5\nValle de Aburrá | {timestamp.strftime('%Y-%m-%d %H:%M')}",
-        fontsize=11, fontweight='bold', pad=10
+        fontsize=10, fontweight='bold', pad=10
     )
     ax.set_xlabel(r"Longitud ($^\circ$W)", fontsize=9, fontweight='bold')
     ax.set_ylabel(r"Latitud ($^\circ$N)", fontsize=9, fontweight='bold')
@@ -67,7 +83,6 @@ def _render_single_frame(args):
     ax.set_ylim(Lat.min(), Lat.max())
     plt.tight_layout()
 
-    # Guardar cuadro en memoria
     buf = io.BytesIO()
     plt.savefig(buf, format='png', dpi=100)
     plt.close(fig)
@@ -81,10 +96,8 @@ def generate_assimilation_gif(
     total_steps = len(timestamps)
     v_max = float(np.max(campo_reconstruido))
     
-    # Convertir mallas a Lat/Lon
     Lon, Lat = km_to_latlon(X, Y)
     
-    # Preparar argumentos para cada proceso
     tasks = [
         (t, campo_reconstruido[t], Lon, Lat, active_est_km, 
          Y_obs[t] if Y_obs is not None else None, station_codes, timestamps[t], v_max)
@@ -101,10 +114,8 @@ def generate_assimilation_gif(
         for t, img in results:
             frames_dict[t] = img
 
-    # Ordenar cuadros
     ordered_images = [frames_dict[t] for t in range(total_steps)]
 
-    # Guardar GIF
     ordered_images[0].save(
         output_gif,
         save_all=True,

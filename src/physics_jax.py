@@ -2,6 +2,29 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jax.scipy.signal import convolve2d
+import os
+import numpy as np
+
+# Cargar los datos de viento guardados previamente
+WIND_FILE = "data/wind_vectors.npz"
+
+if os.path.exists(WIND_FILE):
+    _WIND_DATA = np.load(WIND_FILE)
+    U_SERIES = _WIND_DATA["u"]
+    V_SERIES = _WIND_DATA["v"]
+else:
+    U_SERIES = None
+    V_SERIES = None
+
+def get_wind_from_data(step_index: int) -> tuple[float, float]:
+    """Retorna (u_wind, v_wind) reales cargados de Open-Meteo para el paso temporal dado."""
+    if U_SERIES is None:
+        # Fallback a brisa por defecto si no existe el archivo
+        return 0.6, 2.2 
+    
+    # Mapeo del paso de tiempo al índice disponible
+    idx = step_index % len(U_SERIES)
+    return float(U_SERIES[idx]), float(V_SERIES[idx])
 
 # Kernel Gaussiano 3x3 para estructurar espacialmente el ruido Q
 _GAUSSIAN_KERNEL_3X3 = jnp.array([
@@ -9,12 +32,6 @@ _GAUSSIAN_KERNEL_3X3 = jnp.array([
     [2.0, 4.0, 2.0],
     [1.0, 2.0, 1.0]
 ]) / 16.0
-
-def get_wind_aburra(hour: int) -> tuple[float, float]:
-    """Retorna las componentes (u_wind, v_wind) en km/h según el ciclo diurno del Aburrá."""
-    if 8 <= hour <= 18:
-        return 0.6, 2.2  # Brisa diurna Sur -> Norte
-    return 0.2, 0.8      # Drenaje nocturno suave
 
 @partial(jax.jit, static_argnames=['Nx', 'Ny'])
 def step_physics_single(
