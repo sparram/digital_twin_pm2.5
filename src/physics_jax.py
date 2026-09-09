@@ -5,7 +5,6 @@ from jax.scipy.signal import convolve2d
 import os
 import numpy as np
 
-# Cargar los datos de viento guardados previamente
 WIND_FILE = "data/wind_vectors.npz"
 
 if os.path.exists(WIND_FILE):
@@ -16,17 +15,15 @@ else:
     U_SERIES = None
     V_SERIES = None
 
-def get_wind_from_data(step_index: int) -> tuple[float, float]:
-    """Retorna (u_wind, v_wind) reales cargados de Open-Meteo para el paso temporal dado."""
+def get_wind_from_data(step_index: int, override_wind: tuple[float, float] = (0.8, 0.3)) -> tuple[float, float]:
+    """Retorna el viento. Si se especifica override_wind, ignora los datos en disco."""
+    if override_wind is not None:
+        return override_wind
     if U_SERIES is None:
-        # Fallback a brisa por defecto si no existe el archivo
-        return 0.6, 2.2 
-    
-    # Mapeo del paso de tiempo al índice disponible
+        return 0.8, 0.3
     idx = step_index % len(U_SERIES)
     return float(U_SERIES[idx]), float(V_SERIES[idx])
-
-# Kernel Gaussiano 3x3 para estructurar espacialmente el ruido Q
+    
 _GAUSSIAN_KERNEL_3X3 = jnp.array([
     [1.0, 2.0, 1.0],
     [2.0, 4.0, 2.0],
@@ -41,41 +38,37 @@ def step_physics_single(
     dx: float,
     dy: float,
     dt: float,
+    source_flat: jnp.ndarray = None,
     D_diff: float = 0.15,
     Nx: int = 25,
     Ny: int = 30
 ) -> jnp.ndarray:
-    """Avanza la EDP con condiciones de frontera abiertas (Neumann/Outflow)."""
+    """Avanza la EDP con condiciones de frontera abiertas y término fuente opcional."""
     C = c_flat.reshape((Ny, Nx))
-    
-    # 1. Padding 'edge': duplica los bordes (gradiente espacial nulo en frontera, dC/dn = 0)
     C_pad = jnp.pad(C, ((1, 1), (1, 1)), mode='edge')
     
-    # 2. Difusión de segundo orden con bordes abiertos
     d2C_dx2 = (C_pad[1:-1, 2:] - 2.0 * C + C_pad[1:-1, :-2]) / (dx ** 2)
     d2C_dy2 = (C_pad[2:, 1:-1] - 2.0 * C + C_pad[:-2, 1:-1]) / (dy ** 2)
     
-    # 3. Advección Upwind (el flujo depende de la dirección del viento)
-    # Eje X:
     dC_dx_back = (C - C_pad[1:-1, :-2]) / dx
     dC_dx_fore = (C_pad[1:-1, 2:] - C) / dx
     dC_dx = jnp.where(u_wind > 0, dC_dx_back, dC_dx_fore)
     
-    # Eje Y:
     dC_dy_back = (C - C_pad[:-2, 1:-1]) / dy
     dC_dy_fore = (C_pad[2:, 1:-1] - C) / dy
     dC_dy = jnp.where(v_wind > 0, dC_dy_back, dC_dy_fore)
     
-    # EDP temporal
     dC_dt = -(u_wind * dC_dx + v_wind * dC_dy) + D_diff * (d2C_dx2 + d2C_dy2)
-    C_new = C + dt * dC_dt
     
+    if source_flat is not None:
+        dC_dt = dC_dt + source_flat.reshape((Ny, Nx))
+
+    C_new = C + dt * dC_dt
     return jnp.clip(C_new.flatten(), 0.0)
 
-# Vectorización mediante vmap sobre el eje de miembros (axis=1)
 _step_ensemble_vmap = jax.vmap(
     step_physics_single,
-    in_axes=(1, None, None, None, None, None, None, None, None),
+    in_axes=(1, None, None, None, None, None, None, None, None, None),
     out_axes=1
 )
 
@@ -88,18 +81,17 @@ def forecast_step(
     dx: float,
     dy: float,
     dt: float,
-    Q_std: float = 1.5,
+    source_flat: jnp.ndarray = None,
+    Q_std: float = 0.5,
     D_diff: float = 0.15,
     Nx: int = 25,
     Ny: int = 30
 ) -> jnp.ndarray:
-    """Paso completo de Pronóstico (Forecast Step) con fronteras abiertas y ruido estructurado."""
-    # Propagación física
+    """Paso de pronóstico con inclusión de mapa de emisión."""
     ens_phys = _step_ensemble_vmap(
-        ensemble, u_wind, v_wind, dx, dy, dt, D_diff, Nx, Ny
+        ensemble, u_wind, v_wind, dx, dy, dt, source_flat, D_diff, Nx, Ny
     )
     
-    # Ruido de proceso 2D correlacionado espacialmente
     n_ens = ensemble.shape[1]
     raw_noise = jax.random.normal(key, shape=(Ny, Nx, n_ens))
     

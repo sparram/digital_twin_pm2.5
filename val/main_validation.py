@@ -84,7 +84,7 @@ def main():
     )
 
     # 3. SELECCIÓN DE ESTACIÓN A OCULTAR (HOLD-OUT)
-    holdout_code = "CEN-TRAF"  # Puedes cambiar por "CEN-TRAF", "MED-SCRI", etc.
+    holdout_code = "MED-ARAN"  # Puedes cambiar por "CEN-TRAF", "MED-SCRI", etc.
     
     if holdout_code not in codes:
         raise ValueError(f"La estación '{holdout_code}' no se encuentra en las estaciones activas del CSV.")

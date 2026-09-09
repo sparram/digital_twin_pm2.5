@@ -35,7 +35,8 @@ def analysis_step(
     y_obs: jnp.ndarray,
     H: jnp.ndarray,
     R: jnp.ndarray,
-    C_mat: jnp.ndarray
+    C_mat: jnp.ndarray,
+    inflation_factor: float
 ) -> jnp.ndarray:
     """Paso de Análisis EnKF con Localización de Covarianza por Producto de Schur."""
     n_ensemble = ensemble.shape[1]
@@ -44,6 +45,7 @@ def analysis_step(
     # 1. Media y matriz de anomalías
     x_mean = jnp.mean(ensemble, axis=1, keepdims=True)
     A_prime = ensemble - x_mean
+    A_prime *= jnp.sqrt(inflation_factor)
     HA_prime = H @ A_prime
     
     # 2. Covarianzas P_y y P_xy (Con localización de Schur)
@@ -80,7 +82,8 @@ def run_enkf_assimilation(
     Ny: int = 30,
     R_std: float = 2.5,
     Q_std: float = 1.5,
-    r_cut: float = 6.0
+    r_cut: float = 6.0,
+    inflation_factor: float = 1.05
 ):
     """Bucle principal de asimilación con localización espacial."""
     total_steps, p = Y_obs.shape
@@ -97,18 +100,26 @@ def run_enkf_assimilation(
     R = jnp.eye(p) * (R_std ** 2)
     campo_reconstruido = []
     
+    # Dentro del bucle t en run_enkf_assimilation:
     for t in range(total_steps):
         key, subkey_fore, subkey_anal = jax.random.split(key, 3)
-        u_t, v_t = get_wind_from_data(t)
         
+        # Forzar el viento constante sintético (0.8, 0.3)
+        u_t, v_t = get_wind_from_data(t, override_wind=(0.8, 0.3))
+        
+        # Evaluar fuente en el instante t
+        source_t = 2.0 * jnp.sin(2 * jnp.pi * t / 24.0)**2 * jnp.exp(-(((X - 5.0)**2 + (Y - 5.0)**2) / 2.0))
+        source_flat = source_t.ravel()
+    
         # Paso 1: Pronóstico
         ensemble = forecast_step(
-            subkey_fore, ensemble, u_t, v_t, dx, dy, dt, Q_std=Q_std, Nx=Nx, Ny=Ny
+            subkey_fore, ensemble, u_t, v_t, dx, dy, dt,
+            source_flat=source_flat, Q_std=Q_std, Nx=Nx, Ny=Ny
         )
         
-        # Paso 2: Análisis (Pasando C_mat)
+        # Paso 2: Análisis
         ensemble = analysis_step(
-            subkey_anal, ensemble, Y_obs[t], H, R, C_mat
+            subkey_anal, ensemble, Y_obs[t], H, R, C_mat, inflation_factor
         )
         
         x_analysis_mean = jnp.mean(ensemble, axis=1).reshape((Ny, Nx))
