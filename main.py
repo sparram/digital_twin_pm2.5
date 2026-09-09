@@ -44,7 +44,7 @@ def main():
     key, subkey = jax.random.split(key)
     campo_reconstruido, ensemble_final = run_enkf_assimilation(
         subkey, Y_obs, timestamps, H, dx, dy, X, Y, active_est_km,
-        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=1.5, Q_std=3.5
+        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=2.5, Q_std=10.0
     )
     
     # Sincronizar llamadas asíncronas de JAX para medir tiempo real de ejecución
