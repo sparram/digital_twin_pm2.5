@@ -117,7 +117,7 @@ def generate_assimilation_gif(
     ordered_images = [frames_dict[t] for t in range(total_steps)]
 
     ordered_images[0].save(
-        output_gif,
+        "media/" + output_gif,
         save_all=True,
         append_images=ordered_images[1:],
         duration=120,

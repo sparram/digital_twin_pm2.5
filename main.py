@@ -84,21 +84,5 @@ def main():
         output_gif='aburra_pm25_enkf.gif'
     )
 
-    # 9. Visualización del campo asimilado final
-    plt.figure(figsize=(8, 6), dpi=120)
-    plt.pcolormesh(X, Y, campo_reconstruido[-1], cmap='YlOrRd', shading='auto')
-    plt.colorbar(label=r'PM2.5 ($\mu g / m^3$)')
-    
-    for code, (x_est, y_est) in active_est_km.items():
-        plt.scatter(x_est, y_est, color='blue', edgecolors='white', zorder=5)
-        plt.annotate(code, (x_est + 0.3, y_est + 0.3), fontsize=7, color='black', weight='bold')
-
-    plt.title(f"Reconstrucción EnKF 2D con JAX (Hora t={len(timestamps)})", fontsize=11, fontweight='bold')
-    plt.xlabel("X (km)")
-    plt.ylabel("Y (km)")
-    plt.grid(True, linestyle=':', alpha=0.4)
-    plt.tight_layout()
-    plt.show()
-
 if __name__ == '__main__':
     main()

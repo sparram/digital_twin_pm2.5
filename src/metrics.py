@@ -34,4 +34,5 @@ def plot_station_validation(timestamps, Y_obs, Y_pred, codes, target_code='ITA-C
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.legend(frameon=True, facecolor='white', edgecolor='none')
     plt.tight_layout()
+    plt.savefig(f"media/{target_code}-asim-time-series.png")
     plt.show()
