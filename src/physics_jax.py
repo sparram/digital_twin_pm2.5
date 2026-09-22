@@ -74,7 +74,12 @@ def step_physics_single(
     C_new = jnp.clip(C + dt * dC_dt, 0.0)
     
     # La fuente S evoluciona con persistencia simple (modelo de caminata aleatoria base)
-    S_new = jnp.maximum(0.0, S) # Se mantiene positiva
+    #S_new = jnp.maximum(0.0, S) # Se mantiene positiva
+    # Factor de decaimiento (alpha controla qué tan rápido se "apagan" las fuentes inivas)
+    alpha = 0.95 
+    
+    # La fuente evoluciona decayendo y sumando el ruido espacial suavizado que ya calculas
+    S_new = jnp.maximum(0.0, (1.0 - alpha * dt) * S)
     
     return C_new.flatten(), S_new.flatten()
 
