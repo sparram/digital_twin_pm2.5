@@ -85,14 +85,21 @@ def run_enkf_assimilation(
     """Bucle principal de asimilación con localización espacial."""
     total_steps, p = Y_obs.shape
     state_dim = Nx * Ny
+
+    # Aumento de la matriz de observación
+    H_aug = jnp.hstack([H, jnp.zeros((p, Nx * Ny))])
     
     # Precalculo de la matriz C de localización (Estatico para todas las iteraciones)
-    C_mat = compute_localization_matrix(X, Y, active_est_km, r_cut=r_cut)
-    
-    key, subkey_init = jax.random.split(key)
+    C_mat_base = compute_localization_matrix(X, Y, active_est_km, r_cut=r_cut)
+    C_mat_aug = jnp.vstack([C_mat_base, C_mat_base]) # <--- Duplicada para el estado aumentado
+        
+    key, subkey_c, subkey_s = jax.random.split(key, 3)
     init_val = jnp.nanmean(Y_obs[0])
-    ensemble = init_val + jax.random.normal(subkey_init, shape=(state_dim, n_ensemble)) * 4.0
-    ensemble = jnp.clip(ensemble, 0.0)
+
+    ensemble_c = init_val + jax.random.normal(subkey_c, shape=(state_dim, n_ensemble)) * 4.0
+    ensemble_s = jnp.abs(jax.random.normal(subkey_s, shape=(state_dim, n_ensemble)) * 0.1) # Fuente inicial baja positiva
+    
+    ensemble = jnp.vstack([jnp.clip(ensemble_c, 0.0), ensemble_s])
     
     R = jnp.eye(p) * (R_std ** 2)
     campo_reconstruido = []
@@ -106,12 +113,14 @@ def run_enkf_assimilation(
             subkey_fore, ensemble, u_t, v_t, dx, dy, dt, Q_std=Q_std, Nx=Nx, Ny=Ny
         )
         
-        # Paso 2: Análisis (Pasando C_mat)
+        # Paso 2: Análisis (Pasando matrices aumentadas)
         ensemble = analysis_step(
-            subkey_anal, ensemble, Y_obs[t], H, R, C_mat
+            subkey_anal, ensemble, Y_obs[t], H_aug, R, C_mat_aug
         )
         
-        x_analysis_mean = jnp.mean(ensemble, axis=1).reshape((Ny, Nx))
+        # Extraer solo la primera mitad (concentración c) para visualizar el campo
+        c_mean_flat = jnp.mean(ensemble[:state_dim, :], axis=1)
+        x_analysis_mean = c_mean_flat.reshape((Ny, Nx))
         campo_reconstruido.append(x_analysis_mean)
         
     return jnp.array(campo_reconstruido), ensemble
