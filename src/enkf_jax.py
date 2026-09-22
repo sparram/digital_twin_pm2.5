@@ -13,7 +13,7 @@ def gaspari_cohn(r: jnp.ndarray, r_cut: float) -> jnp.ndarray:
     val = jnp.where(z < 1.0, p1, jnp.where(z <= 2.0, p2, 0.0))
     return jnp.maximum(0.0, val)
 
-def compute_localization_matrix(X_grid: jnp.ndarray, Y_grid: jnp.ndarray, active_est_km: dict, r_cut: float = 6.0) -> jnp.ndarray:
+def compute_localization_matrix(X_grid: jnp.ndarray, Y_grid: jnp.ndarray, active_est_km: dict, r_cut: float = 10.0) -> jnp.ndarray:
     """Construye la matriz C de atenuación espacial (N_celdas, p_estaciones)."""
     X_flat = X_grid.ravel()
     Y_flat = Y_grid.ravel()
@@ -79,8 +79,8 @@ def run_enkf_assimilation(
     Nx: int = 25,
     Ny: int = 30,
     R_std: float = 2.5,
-    Q_std: float = 1.5,
-    r_cut: float = 6.0
+    Q_std: float = 0.5,
+    r_cut: float = 10.0
 ):
     """Bucle principal de asimilación con localización espacial."""
     total_steps, p = Y_obs.shape
@@ -103,6 +103,9 @@ def run_enkf_assimilation(
     
     R = jnp.eye(p) * (R_std ** 2)
     campo_reconstruido = []
+
+    hist_concentracion = []
+    hist_fuentes = []
     
     for t in range(total_steps):
         key, subkey_fore, subkey_anal = jax.random.split(key, 3)
@@ -118,9 +121,15 @@ def run_enkf_assimilation(
             subkey_anal, ensemble, Y_obs[t], H_aug, R, C_mat_aug
         )
         
-        # Extraer solo la primera mitad (concentración c) para visualizar el campo
-        c_mean_flat = jnp.mean(ensemble[:state_dim, :], axis=1)
-        x_analysis_mean = c_mean_flat.reshape((Ny, Nx))
-        campo_reconstruido.append(x_analysis_mean)
+        # Extraer la media del ensamble actual para C y S
+        c_mean = ensemble[:state_dim, :].mean(axis=1).reshape((Ny, Nx))
+        s_mean = ensemble[state_dim:, :].mean(axis=1).reshape((Ny, Nx))
+
+        hist_concentracion.append(c_mean)
+        hist_fuentes.append(s_mean)
+    
+    # Al final, los conviertes en arrays de JAX o NumPy:
+    hist_concentracion = jnp.array(hist_concentracion) # Forma: (T, Ny, Nx)
+    hist_fuentes = jnp.array(hist_fuentes)             # Forma: (T, Ny, Nx)
         
-    return jnp.array(campo_reconstruido), ensemble
+    return hist_concentracion, hist_fuentes, ensemble

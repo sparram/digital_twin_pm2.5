@@ -42,11 +42,17 @@ def main():
     start_time = time.time()
     
     key, subkey = jax.random.split(key)
-    campo_reconstruido, ensemble_final = run_enkf_assimilation(
+    
+    # MODIFICADO: Recibimos los historiales que ahora exporta enkf_jax.py
+    hist_concentracion, hist_fuentes, ensemble_final = run_enkf_assimilation(
         subkey, Y_obs, timestamps, H, dx, dy, X, Y, active_est_km,
-        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=1.5, Q_std=3.5
+        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=1.5, Q_std=0.5
     )
     
+    # Nota: Si el campo reconstruido principal se usa para las métricas, 
+    # puedes usar directamente hist_concentracion.
+    campo_reconstruido = hist_concentracion 
+
     # Sincronizar llamadas asíncronas de JAX para medir tiempo real de ejecución
     campo_reconstruido.block_until_ready()
     elapsed_time = time.time() - start_time
@@ -72,16 +78,15 @@ def main():
     plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='SAB-RAME')
     plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='CEN-TRAF')
 
-    # 8. Exportar GIF Animado del Gemelo Digital
+    # 8. Exportar GIF Animado del Gemelo Digital (Dual: Concentración vs Fuente)
     generate_assimilation_gif(
-        campo_reconstruido=campo_reconstruido,
-        X=X,
-        Y=Y,
-        active_est_km=active_est_km,
-        timestamps=timestamps,
-        Y_obs=np.array(Y_obs),
-        station_codes=codes,
-        output_gif='aburra_pm25_enkf.gif'
+        campo_reconstruido=hist_concentracion, 
+        campo_fuentes=hist_fuentes, 
+        X=X, Y=Y, 
+        active_est_km=active_est_km, 
+        timestamps=timestamps, 
+        Y_obs=Y_obs, # Usamos el Y_obs original que cargaste en el paso 2
+        output_gif='aburra_dual_enkf.gif'
     )
 
 if __name__ == '__main__':

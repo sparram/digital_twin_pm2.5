@@ -99,7 +99,7 @@ def forecast_step(
     dx: float,
     dy: float,
     dt: float,
-    Q_std: float = 1.5,
+    Q_std: float = 0.5,
     D_diff: float = 0.15,
     Nx: int = 25,
     Ny: int = 30
