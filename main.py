@@ -1,88 +1,84 @@
-import time
-import jax
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
+import pandas as pd
+import torch
 import numpy as np
+from src.data_loader import DEFAULT_STATIONS, LAT_REF, LON_REF
+import pickle
 
-# Módulos originales de tu proyecto
-from src.grid import setup_grid, load_and_clean_data, build_observation_matrix_H
-from src.enkf_jax import run_enkf_assimilation
+# 1. Cargar el diccionario de vientos
+with open('wind_data.pkl', 'rb') as f:
+    wind_data_dict = pickle.load(f)
 
-# Nuevos módulos de métricas y visualización
-from src.metrics import compute_assimilation_metrics, plot_station_validation
-from src.visualization import generate_assimilation_gif
+# 2. Cargar tu CSV de PM2.5 de SIATA
+csv_path = 'data/Estaciones_PM2.5_2026_06.csv'
+df_pm25 = pd.read_csv(csv_path, parse_dates=['fecha_hora'], index_col='fecha_hora')
 
-def main():
-    # 1. Configurar semilla determinista para JAX
-    key = jax.random.PRNGKey(42)
+# 💡 CORRECCIÓN CRUCIAL: Si el índice de PM2.5 es tz-naive, quitamos el tz a Open-Meteo
+for code in wind_data_dict:
+    if wind_data_dict[code].index.tz is not None:
+        wind_data_dict[code].index = wind_data_dict[code].index.tz_localize(None)
 
-    # 2. Configurar Malla 2D y Cargar Datos
-    Nx, Ny = 25, 30
-    x, y, X, Y, dx, dy = setup_grid(Nx=Nx, Ny=Ny)
-    
-    csv_path = 'data/Estaciones_PM2.5_2026_06.csv'
-    Y_obs, timestamps, active_est_km, codes = load_and_clean_data(
-        csv_path=csv_path, max_steps=int(24*7)
-    )
-    
-    # 3. Construir Operador de Observación H
-    H = build_observation_matrix_H(active_est_km, x, y, Nx, Ny)
-    
-    print(f"Malla: {Nx}x{Ny} | Estaciones activas: {len(codes)} | Pasos de tiempo: {len(timestamps)}")
-    
-    # 4. Paso de calentamiento (JIT Compilation Warmup)
-    print("Compilando grafos de cómputo JAX (Warmup)...")
-    key, subkey = jax.random.split(key)
-    _ = run_enkf_assimilation(
-        subkey, Y_obs[:2], timestamps[:2], H, dx, dy, X, Y, active_est_km, n_ensemble=10, Nx=Nx, Ny=Ny
-    )
-    
-    # 5. Ejecución del filtro EnKF completo con benchmarking
-    print("Ejecutando asimilación EnKF vectorizada en JAX...")
-    start_time = time.time()
-    
-    key, subkey = jax.random.split(key)
-    campo_reconstruido, ensemble_final = run_enkf_assimilation(
-        subkey, Y_obs, timestamps, H, dx, dy, X, Y, active_est_km,
-        dt=0.05, n_ensemble=40, Nx=Nx, Ny=Ny, R_std=1.5, Q_std=3.5
-    )
-    
-    # Sincronizar llamadas asíncronas de JAX para medir tiempo real de ejecución
-    campo_reconstruido.block_until_ready()
-    elapsed_time = time.time() - start_time
-    
-    print(f"\n¡Asimilación completada con éxito!")
-    print(f"Tiempo total de ejecución JAX: {elapsed_time:.4f} segundos")
-    print(f"Velocidad promedio: {len(timestamps) / elapsed_time:.2f} pasos/segundo")
+# 3. Preparar listas para acumular los tensores de entrenamiento
+x_list, y_list, t_list, c_list, u_list, v_list = [], [], [], [], [], []
 
-    # 6. Calcular Métricas de Rendimiento (RMSE y R2)
-    Y_pred, rmse_per_step, rmse_global, r2_global = compute_assimilation_metrics(
-        Y_obs, campo_reconstruido, H
-    )
-    
-    print("\n" + "="*45)
-    print("       MÉTRICAS DE ASIMILACIÓN (EnKF + JAX)    ")
-    print("="*45)
-    print(f"  RMSE Global   : {rmse_global:.3f} µg/m³")
-    print(f"  R² Global     : {r2_global:.4f} ({r2_global*100:.2f}% de varianza explicada)")
-    print("="*45 + "\n")
+t0 = df_pm25.index[0]
 
-    # 7. Graficar comparación temporal en la estación ITA-CJUS (Itagüí)
-    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='MED-ARAN')
-    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='SAB-RAME')
-    plot_station_validation(timestamps, np.array(Y_obs), Y_pred, codes, target_code='CEN-TRAF')
+for code, (lat, lon) in DEFAULT_STATIONS.items():
+    if code in df_pm25.columns and code in wind_data_dict:
+        # Coordenadas relativas en kilómetros respecto a la referencia
+        x_m = (lon - LON_REF) * 111.0 * np.cos(np.radians(LAT_REF))
+        y_m = (lat - LAT_REF) * 111.0
+        
+        # Alinear PM2.5 y Viento por hora de forma segura
+        df_merged = pd.DataFrame({
+            'pm25': df_pm25[code],
+            'u': wind_data_dict[code]['u'],
+            'v': wind_data_dict[code]['v']
+        }).dropna()
+        
+        if len(df_merged) > 0:
+            time_hours = (df_merged.index - t0).total_seconds() / 3600.0
+            
+            for t_val, (idx, row) in zip(time_hours, df_merged.iterrows()):
+                x_list.append(x_m)
+                y_list.append(y_m)
+                t_list.append(t_val)
+                c_list.append(np.log(row['pm25'] + 1.0)) # Transformación logarítmica
+                u_list.append(row['u'])
+                v_list.append(row['v'])
 
-    # 8. Exportar GIF Animado del Gemelo Digital
-    generate_assimilation_gif(
-        campo_reconstruido=campo_reconstruido,
-        X=X,
-        Y=Y,
-        active_est_km=active_est_km,
-        timestamps=timestamps,
-        Y_obs=np.array(Y_obs),
-        station_codes=codes,
-        output_gif='aburra_pm25_enkf.gif'
-    )
+# Convertir a Tensores de PyTorch
+x_data = torch.tensor(x_list, dtype=torch.float32).unsqueeze(1)
+y_data = torch.tensor(y_list, dtype=torch.float32).unsqueeze(1)
+t_data = torch.tensor(t_list, dtype=torch.float32).unsqueeze(1)
+C_true = torch.tensor(c_list, dtype=torch.float32).unsqueeze(1)
+u_true = torch.tensor(u_list, dtype=torch.float32).unsqueeze(1)
+v_true = torch.tensor(v_list, dtype=torch.float32).unsqueeze(1)
 
-if __name__ == '__main__':
-    main()
+print(f"-> ¡Listo! Tensores creados con éxito. Muestras totales: {len(x_data)}")
+
+
+# Definir los límites geográficos aproximados del Valle de Aburrá en km
+# Ancho Este-Oeste (~15 km), Largo Sur-Norte (~45 km), Duración en horas del mes
+valle_width_km = 15.0
+valle_length_km = 45.0
+max_time_hours = float(t_data.max().item())
+
+num_collocation_points = 10000
+
+# Puntos aleatorios uniformes en el dominio espaciotemporal
+x_col = torch.rand(num_collocation_points, 1) * valle_width_km
+y_col = torch.rand(num_collocation_points, 1) * valle_length_km
+t_col = torch.rand(num_collocation_points, 1) * max_time_hours
+
+print(f"-> {num_collocation_points} puntos de colocación física generados.")
+
+
+from src.trainer import train_pinn
+
+# Ejecutar el entrenamiento (en Google Colab con GPU T4 esto volará)
+trained_model = train_pinn(
+    x_data, y_data, t_data, C_true, u_true, v_true, 
+    x_col, y_col, t_col, 
+    epochs=1500, 
+    lr=0.001
+)
